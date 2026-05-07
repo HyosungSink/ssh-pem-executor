@@ -4,10 +4,6 @@
   "description": "MCP server for running commands on a remote SSH host with a PEM private key.",
   "type": "module",
   "private": true,
-  "bin": {
-    "ssh-pem-executor-mcp": "./scripts/server.js",
-    "ssh-pem-run": "./scripts/terminal.js"
-  },
   "engines": {
     "node": ">=18"
   },

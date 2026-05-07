@@ -7,15 +7,9 @@ This Codex plugin exposes an MCP server that runs commands on a remote SSH host 
 - `ssh_check`: verifies connectivity by running a tiny command on the remote host.
 - `ssh_run`: runs a command on the remote host and returns only the remote terminal output. Login banners, setup output, host metadata, and JSON wrappers are intentionally stripped.
 
-## Terminal-Style CLI
+## MCP Entry Only
 
-When the MCP tool is not loaded directly in Codex, use the bundled CLI instead of a JSON-RPC heredoc:
-
-```bash
-ssh-pem-run --cwd /home/ma-user/work --timeout 1200 -- git status --short
-```
-
-The CLI reads `.mcp.json`, calls the same `ssh_run` MCP tool internally, prints only the remote terminal output, and exits with the remote command's exit code.
+Codex loads this plugin through `.mcp.json`, which starts `node ./scripts/server.js` as an MCP server. The package intentionally does not expose a terminal CLI; use the Codex MCP tools directly.
 
 ## Configure
 
@@ -64,7 +58,7 @@ This plugin sets `SSH_PEM_DEFAULT_CWD=/home/ma-user/work`, so `ssh_run` commands
 
 `ssh_run` prepends an internal marker immediately before the user command starts, then removes everything before that marker from the returned tool text. This keeps ModelArts login banners and toolchain setup chatter out of the result while preserving the command's own stdout/stderr.
 
-The MCP protocol response is still JSON-RPC internally, but the tool content text is pure terminal output. The `ssh-pem-run` CLI hides that JSON-RPC transport completely for terminal fallback use.
+The MCP protocol response is still JSON-RPC internally, but the tool content text is pure terminal output for Codex tool calls.
 
 ## ModelArts Development Baseline
 
@@ -86,11 +80,10 @@ This plugin also loads the user-installed competition toolchain before each remo
 ## Local Smoke Test
 
 ```bash
-cd plugins/ssh-pem-executor
 npm run smoke
-npm link
-ssh-pem-run --cwd /home/ma-user/work -- printf 'ok\n'
 ```
+
+The smoke test starts `scripts/server.js`, performs MCP `initialize` and `tools/list`, and checks that `ssh_run` and `ssh_check` are advertised.
 
 ## Security
 

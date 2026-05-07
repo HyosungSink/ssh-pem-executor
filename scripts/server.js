@@ -549,11 +549,25 @@ async function stopPtySession(args = {}) {
 }
 
 function makeToolResult(result) {
+  const statusText = [
+    "[ssh_run status]",
+    `target=${result.target ?? ""}`,
+    `cwd=${result.defaultCwd ?? ""}`,
+    `persistentWorkdir=${result.persistentWorkdir ?? ""}`,
+    `exitCode=${result.exitCode ?? ""}`,
+    `signal=${result.signal ?? ""}`,
+    `timedOut=${Boolean(result.timedOut)}`,
+    `stdoutTruncated=${Boolean(result.stdoutTruncated)}`,
+    `stderrTruncated=${Boolean(result.stderrTruncated)}`,
+    `terminalOutputTruncated=${Boolean(result.terminalOutputTruncated)}`,
+    "--- output ---",
+  ].join("\n");
+  const outputText = result.terminalOutput ?? "";
   return {
     content: [
       {
         type: "text",
-        text: result.terminalOutput ?? "",
+        text: `${statusText}\n${outputText}`,
       },
     ],
     isError: result.timedOut || (typeof result.exitCode === "number" && result.exitCode !== 0),
@@ -574,11 +588,26 @@ function makeToolResult(result) {
 function makePtyToolResult(result) {
   const failed = result.session.closed &&
     (typeof result.session.exitCode === "number" && result.session.exitCode !== 0);
+  const statusText = [
+    "[ssh_pty status]",
+    `sessionId=${result.session.id}`,
+    `alive=${!result.session.closed}`,
+    `target=${result.session.target}`,
+    `cwd=${result.session.cwd ?? ""}`,
+    `persistentWorkdir=${result.session.persistentWorkdir ?? ""}`,
+    `exitCode=${result.session.exitCode ?? ""}`,
+    `signal=${result.session.signal ?? ""}`,
+    `outputTruncated=${Boolean(result.output?.truncated)}`,
+    `droppedBufferedBytes=${result.session.truncatedBytes}`,
+    `createdAt=${result.session.createdAt}`,
+    "--- output ---",
+  ].join("\n");
+  const outputText = result.output?.text ?? "";
   return {
     content: [
       {
         type: "text",
-        text: result.output?.text ?? "",
+        text: `${statusText}\n${outputText}`,
       },
     ],
     isError: failed,

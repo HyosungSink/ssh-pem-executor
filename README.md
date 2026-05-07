@@ -61,11 +61,11 @@ This plugin sets `SSH_PEM_DEFAULT_CWD=/home/ma-user/work`, so `ssh_run` commands
 
 ## Terminal Output Behavior
 
-`ssh_run` prepends an internal marker immediately before the user command starts, then removes everything before that marker from the returned tool text. This keeps ModelArts login banners and toolchain setup chatter out of the result while preserving the command's own stdout/stderr.
+`ssh_run` prepends an internal marker immediately before the user command starts, then removes everything before that marker from the returned tool text. This keeps ModelArts login banners and toolchain setup chatter out of the command output while preserving the command's own stdout/stderr.
 
 `ssh_pty_start` opens `ssh -tt` and keeps the SSH process alive inside the MCP server. Use `ssh_pty_send` and `ssh_pty_read` to interact with the same remote shell, so shell state such as `cd`, exported variables, foreground jobs, prompts, and interactive program state can persist across tool calls until `ssh_pty_stop`.
 
-The MCP protocol response is still JSON-RPC internally, but the tool content text is pure terminal output for Codex tool calls.
+The MCP protocol response is still JSON-RPC internally. Tool content includes a compact status block followed by `--- output ---` and the remote terminal output, so Codex can show target, cwd, exit code, timeout, truncation, and PTY session state without relying on hidden `_meta`.
 
 ## ModelArts Development Baseline
 

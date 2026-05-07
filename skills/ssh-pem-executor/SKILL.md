@@ -25,5 +25,5 @@ Use this skill when the user asks to run a command on their configured SSH machi
 - Every remote command loads the competition baseline through `SSH_PEM_REMOTE_SETUP_COMMAND`: CANN 8.5.0, GCC/G++ 10.3.0, CMake 3.28.3, and `REMOTE_BUILD_JOBS=20`.
 - `TORCH_DEVICE_BACKEND_AUTOLOAD=0` is set, but Python tests should still import `torch` and `torch_npu` before importing a compiled `custom_ops_lib`.
 - The usable quota is `24 vCPUs | 192 GiB`; use around 20 parallel jobs unless memory pressure or tool limits require less.
-- `ssh_run` and PTY tools should show only remote terminal output to the user; JSON-RPC plumbing and local wrapper code are not part of the user-facing transcript.
+- `ssh_run` and PTY tools show a compact status block in content, then `--- output ---`, then remote terminal output. JSON-RPC plumbing and local wrapper code are not part of the user-facing transcript.
 - A PTY session is process-local to the running MCP server. Stop it with `ssh_pty_stop` when finished so the remote shell does not linger.

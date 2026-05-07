@@ -323,6 +323,17 @@ function makeToolResult(result) {
       },
     ],
     isError: result.timedOut || (typeof result.exitCode === "number" && result.exitCode !== 0),
+    _meta: {
+      exitCode: result.exitCode,
+      signal: result.signal,
+      timedOut: result.timedOut,
+      target: result.target,
+      defaultCwd: result.defaultCwd,
+      persistentWorkdir: result.persistentWorkdir,
+      stdoutTruncated: result.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated,
+      terminalOutputTruncated: result.terminalOutputTruncated,
+    },
   };
 }
 

@@ -5,13 +5,15 @@
   "type": "module",
   "private": true,
   "bin": {
-    "ssh-pem-executor-mcp": "./scripts/server.js"
+    "ssh-pem-executor-mcp": "./scripts/server.js",
+    "ssh-pem-run": "./scripts/terminal.js"
   },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "start": "node ./scripts/server.js",
+    "run": "node ./scripts/terminal.js",
     "smoke": "node ./scripts/smoke-test.js"
   }
 }

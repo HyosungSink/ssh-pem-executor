@@ -5,8 +5,8 @@
   "author": {
     "name": "HyosungSink"
   },
-  "homepage": "https://github.com/HyosungSink/ssh-pem-executor",
-  "repository": "https://github.com/HyosungSink/ssh-pem-executor.git",
+  "homepage": "https://github.com/HyosungSink/SSH-PEM-Executor",
+  "repository": "https://github.com/HyosungSink/SSH-PEM-Executor.git",
   "license": "MIT",
   "keywords": [
     "ssh",
@@ -26,7 +26,7 @@
       "Interactive",
       "Execute"
     ],
-    "websiteURL": "https://github.com/HyosungSink/ssh-pem-executor",
+    "websiteURL": "https://github.com/HyosungSink/SSH-PEM-Executor",
     "privacyPolicyURL": "https://example.com/privacy",
     "termsOfServiceURL": "https://example.com/terms",
     "defaultPrompt": [

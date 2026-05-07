@@ -51,7 +51,17 @@ send({
 
 const list = await readResponse();
 const names = list.result?.tools?.map((tool) => tool.name) ?? [];
-if (!names.includes("ssh_run") || !names.includes("ssh_check")) {
+const expectedTools = [
+  "ssh_run",
+  "ssh_check",
+  "ssh_pty_start",
+  "ssh_pty_send",
+  "ssh_pty_read",
+  "ssh_pty_stop",
+  "ssh_pty_list",
+];
+const missingTools = expectedTools.filter((name) => !names.includes(name));
+if (missingTools.length > 0) {
   throw new Error(`tools/list missing expected tools: ${names.join(", ")}`);
 }
 

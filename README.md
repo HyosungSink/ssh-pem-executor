@@ -6,6 +6,11 @@ This Codex plugin exposes an MCP server that runs commands on a remote SSH host 
 
 - `ssh_check`: verifies connectivity by running a tiny command on the remote host.
 - `ssh_run`: runs a command on the remote host and returns only the remote terminal output. Login banners, setup output, host metadata, and JSON wrappers are intentionally stripped.
+- `ssh_pty_start`: starts a persistent interactive SSH PTY shell and returns a session id.
+- `ssh_pty_send`: sends exact input to a persistent PTY session, such as `pwd\n`.
+- `ssh_pty_read`: reads newly available output from a PTY session.
+- `ssh_pty_stop`: exits and removes a PTY session.
+- `ssh_pty_list`: lists PTY sessions held by the current MCP server process.
 
 ## MCP Entry Only
 
@@ -52,11 +57,13 @@ Runtime target overrides are disabled by default so a model cannot silently swit
 
 For this ModelArts machine, only `/home/ma-user/work` is persistent. Files written outside that directory may disappear when the remote environment is restarted.
 
-This plugin sets `SSH_PEM_DEFAULT_CWD=/home/ma-user/work`, so `ssh_run` commands execute from the persistent directory unless a different `cwd` is explicitly provided.
+This plugin sets `SSH_PEM_DEFAULT_CWD=/home/ma-user/work`, so `ssh_run` commands and `ssh_pty_start` sessions begin in the persistent directory unless a different `cwd` is explicitly provided.
 
 ## Terminal Output Behavior
 
 `ssh_run` prepends an internal marker immediately before the user command starts, then removes everything before that marker from the returned tool text. This keeps ModelArts login banners and toolchain setup chatter out of the result while preserving the command's own stdout/stderr.
+
+`ssh_pty_start` opens `ssh -tt` and keeps the SSH process alive inside the MCP server. Use `ssh_pty_send` and `ssh_pty_read` to interact with the same remote shell, so shell state such as `cd`, exported variables, foreground jobs, prompts, and interactive program state can persist across tool calls until `ssh_pty_stop`.
 
 The MCP protocol response is still JSON-RPC internally, but the tool content text is pure terminal output for Codex tool calls.
 
@@ -76,6 +83,7 @@ This plugin also loads the user-installed competition toolchain before each remo
 - "用 ssh_check 测试远程机器连接。"
 - "通过 ssh_run 在远程机器执行 `uptime`。"
 - "通过 ssh_run 在 `/home/ma-user/work` 执行 `git status --short`。"
+- "用 ssh_pty_start 打开一个持久远程终端，然后用 ssh_pty_send 发送 `cd /home/ma-user/work\n`。"
 
 ## Local Smoke Test
 
@@ -83,7 +91,7 @@ This plugin also loads the user-installed competition toolchain before each remo
 npm run smoke
 ```
 
-The smoke test starts `scripts/server.js`, performs MCP `initialize` and `tools/list`, and checks that `ssh_run` and `ssh_check` are advertised.
+The smoke test starts `scripts/server.js`, performs MCP `initialize` and `tools/list`, and checks that one-shot and PTY tools are advertised.
 
 ## Security
 

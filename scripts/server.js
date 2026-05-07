@@ -14,6 +14,11 @@ const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
 const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30;
 const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
+const DEFAULT_PTY_READ_TIMEOUT_MS = 250;
+const DEFAULT_PTY_COLS = 120;
+const DEFAULT_PTY_ROWS = 40;
+
+const ptySessions = new Map();
 
 function env(name, fallback = "") {
   return process.env[name] ?? fallback;
@@ -108,6 +113,34 @@ function buildRemoteScript({ command, cwd, environment, setupCommand, outputMark
   return lines.join("\n");
 }
 
+function buildRemotePtyScript({ command, cwd, environment, setupCommand, outputMarker, remoteShell }) {
+  const lines = ["set -e"];
+  if (setupCommand) {
+    lines.push(setupCommand);
+  }
+  if (cwd) {
+    lines.push(`cd -- ${shellQuote(cwd)}`);
+  }
+  if (environment && typeof environment === "object" && !Array.isArray(environment)) {
+    for (const [key, value] of Object.entries(environment)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        throw new Error(`Invalid environment variable name: ${key}`);
+      }
+      lines.push(`export ${key}=${shellQuote(value)}`);
+    }
+  }
+  if (outputMarker) {
+    lines.push(`printf '%s\\n' ${shellQuote(outputMarker)}`);
+  }
+  lines.push("set +e");
+  if (command && command.trim()) {
+    lines.push(`exec ${command}`);
+  } else {
+    lines.push(`exec ${remoteShell} -li`);
+  }
+  return lines.join("\n");
+}
+
 function appendLimited(chunks, chunk, capturedBytes, maxBytes) {
   if (capturedBytes >= maxBytes) {
     return capturedBytes;
@@ -144,6 +177,10 @@ function stripRemotePrelude(text, marker) {
   }
 
   return text.slice(markerIndex + marker.length).replace(/^\r?\n/, "");
+}
+
+function normalizeTerminalText(text) {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 function mergeTarget(args = {}) {
@@ -314,6 +351,203 @@ async function runSshCommand(args) {
   });
 }
 
+function baseSshArgs(target) {
+  const sshArgs = [
+    "-i",
+    target.keyPath,
+    "-p",
+    String(target.port),
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    `ConnectTimeout=${target.connectTimeoutSeconds}`,
+    "-o",
+    `StrictHostKeyChecking=${target.strictHostKeyChecking}`,
+  ];
+
+  if (target.knownHostsPath) {
+    sshArgs.push("-o", `UserKnownHostsFile=${resolve(target.knownHostsPath.replace(/^~(?=$|\/)/, env("HOME")))}`);
+  }
+
+  return sshArgs;
+}
+
+function appendPtyOutput(session, chunk) {
+  let text = chunk.toString("utf8");
+  if (!session.preludeStripped) {
+    session.preludeBuffer += text;
+    const markerIndex = session.preludeBuffer.indexOf(session.outputMarker);
+    if (markerIndex === -1) {
+      const keepBytes = session.outputMarker.length + 4096;
+      if (session.preludeBuffer.length > keepBytes) {
+        session.preludeBuffer = session.preludeBuffer.slice(-keepBytes);
+      }
+      return;
+    }
+    text = session.preludeBuffer.slice(markerIndex + session.outputMarker.length).replace(/^\r?\n/, "");
+    session.preludeBuffer = "";
+    session.preludeStripped = true;
+  }
+
+  session.pendingText += text;
+  if (session.pendingText.length > session.maxBufferedBytes) {
+    const overflow = session.pendingText.length - session.maxBufferedBytes;
+    session.pendingText = session.pendingText.slice(overflow);
+    session.truncatedBytes += overflow;
+  }
+}
+
+function takePtyOutput(session, maxBytes) {
+  const limit = Math.max(1, maxBytes);
+  let text = session.pendingText;
+  let truncated = false;
+  if (Buffer.byteLength(text, "utf8") > limit) {
+    const buffer = Buffer.from(text, "utf8");
+    text = buffer.subarray(0, limit).toString("utf8");
+    session.pendingText = buffer.subarray(limit).toString("utf8");
+    truncated = true;
+  } else {
+    session.pendingText = "";
+  }
+  return {
+    text: normalizeTerminalText(text),
+    truncated,
+  };
+}
+
+async function waitForPtyOutput(session, timeoutMs) {
+  if (session.pendingText || session.closed) {
+    return;
+  }
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, timeoutMs));
+}
+
+async function startPtySession(args = {}) {
+  const target = mergeTarget(args);
+  await verifyKeyPath(target.keyPath);
+
+  const rows = parsePositiveInteger(args.rows, DEFAULT_PTY_ROWS, 1000);
+  const cols = parsePositiveInteger(args.cols, DEFAULT_PTY_COLS, 1000);
+  const sessionId = randomUUID();
+  const outputMarker = `__SSH_PEM_EXECUTOR_PTY_BEGIN_${sessionId}__`;
+  const remoteScript = buildRemotePtyScript({
+    command: args.command,
+    cwd: args.cwd ?? target.defaultCwd,
+    environment: {
+      TERM: args.term || "xterm-256color",
+      COLUMNS: String(cols),
+      LINES: String(rows),
+      ...(args.env ?? {}),
+    },
+    setupCommand: target.remoteSetupCommand,
+    outputMarker,
+    remoteShell: target.remoteShell,
+  });
+
+  const sshArgs = baseSshArgs(target);
+  sshArgs.push("-tt", `${target.user}@${target.host}`);
+  sshArgs.push(`${target.remoteShell} -lc ${shellQuote(remoteScript)} 2>&1`);
+
+  const child = spawn("ssh", sshArgs, {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  const session = {
+    id: sessionId,
+    child,
+    outputMarker,
+    preludeBuffer: "",
+    preludeStripped: false,
+    pendingText: "",
+    truncatedBytes: 0,
+    maxBufferedBytes: target.maxOutputBytes,
+    target: `${target.user}@${target.host}:${target.port}`,
+    cwd: args.cwd ?? target.defaultCwd ?? null,
+    persistentWorkdir: target.persistentWorkdir || null,
+    closed: false,
+    exitCode: null,
+    signal: null,
+    createdAt: new Date().toISOString(),
+  };
+
+  child.stdout.on("data", (chunk) => appendPtyOutput(session, chunk));
+  child.stderr.on("data", (chunk) => appendPtyOutput(session, chunk));
+  child.on("error", (error) => {
+    appendPtyOutput(session, Buffer.from(error.message));
+  });
+  child.on("close", (exitCode, signal) => {
+    session.closed = true;
+    session.exitCode = exitCode;
+    session.signal = signal;
+  });
+
+  ptySessions.set(sessionId, session);
+  await waitForPtyOutput(session, parsePositiveInteger(args.readTimeoutMs, 750, 10_000));
+  const output = takePtyOutput(session, parsePositiveInteger(args.maxBytes, target.maxOutputBytes, target.maxOutputBytes));
+  return {
+    session,
+    output,
+  };
+}
+
+function getPtySession(sessionId) {
+  const session = ptySessions.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown PTY session: ${sessionId}`);
+  }
+  return session;
+}
+
+async function readPtySession(args = {}) {
+  const session = getPtySession(args.sessionId);
+  const maxBytes = parsePositiveInteger(args.maxBytes, getDefaultConfig().maxOutputBytes, 20_000_000);
+  await waitForPtyOutput(session, parsePositiveInteger(args.timeoutMs, DEFAULT_PTY_READ_TIMEOUT_MS, 60_000));
+  return {
+    session,
+    output: takePtyOutput(session, maxBytes),
+  };
+}
+
+async function sendPtyInput(args = {}) {
+  const session = getPtySession(args.sessionId);
+  if (session.closed) {
+    throw new Error(`PTY session is closed: ${args.sessionId}`);
+  }
+  if (typeof args.input !== "string") {
+    throw new Error("input is required.");
+  }
+  session.child.stdin.write(args.input);
+  return await readPtySession({
+    sessionId: args.sessionId,
+    timeoutMs: args.readTimeoutMs ?? DEFAULT_PTY_READ_TIMEOUT_MS,
+    maxBytes: args.maxBytes,
+  });
+}
+
+async function stopPtySession(args = {}) {
+  const session = getPtySession(args.sessionId);
+  if (!session.closed) {
+    session.child.stdin.write("exit\n");
+    setTimeout(() => {
+      if (!session.closed) {
+        session.child.kill("SIGTERM");
+      }
+    }, 500).unref();
+    setTimeout(() => {
+      if (!session.closed) {
+        session.child.kill("SIGKILL");
+      }
+    }, 2_000).unref();
+  }
+  await waitForPtyOutput(session, parsePositiveInteger(args.readTimeoutMs, 500, 10_000));
+  const output = takePtyOutput(session, parsePositiveInteger(args.maxBytes, getDefaultConfig().maxOutputBytes, 20_000_000));
+  ptySessions.delete(args.sessionId);
+  return {
+    session,
+    output,
+  };
+}
+
 function makeToolResult(result) {
   return {
     content: [
@@ -333,6 +567,32 @@ function makeToolResult(result) {
       stdoutTruncated: result.stdoutTruncated,
       stderrTruncated: result.stderrTruncated,
       terminalOutputTruncated: result.terminalOutputTruncated,
+    },
+  };
+}
+
+function makePtyToolResult(result) {
+  const failed = result.session.closed &&
+    (typeof result.session.exitCode === "number" && result.session.exitCode !== 0);
+  return {
+    content: [
+      {
+        type: "text",
+        text: result.output?.text ?? "",
+      },
+    ],
+    isError: failed,
+    _meta: {
+      sessionId: result.session.id,
+      alive: !result.session.closed,
+      exitCode: result.session.exitCode,
+      signal: result.session.signal,
+      target: result.session.target,
+      cwd: result.session.cwd,
+      persistentWorkdir: result.session.persistentWorkdir,
+      outputTruncated: Boolean(result.output?.truncated),
+      droppedBufferedBytes: result.session.truncatedBytes,
+      createdAt: result.session.createdAt,
     },
   };
 }
@@ -422,6 +682,171 @@ const tools = [
       },
     },
   },
+  {
+    name: "ssh_pty_start",
+    description: "Start a persistent interactive SSH PTY shell on the configured host.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        cwd: {
+          type: "string",
+          description: "Initial working directory on the remote host. Defaults to SSH_PEM_DEFAULT_CWD.",
+        },
+        env: {
+          type: "object",
+          description: "Environment variables exported before the interactive shell starts.",
+          additionalProperties: {
+            type: "string",
+          },
+        },
+        command: {
+          type: "string",
+          description: "Optional interactive command to exec instead of the configured login shell.",
+        },
+        rows: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          description: "PTY row count. Defaults to 40.",
+        },
+        cols: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          description: "PTY column count. Defaults to 120.",
+        },
+        term: {
+          type: "string",
+          description: "TERM value for the remote PTY. Defaults to xterm-256color.",
+        },
+        readTimeoutMs: {
+          type: "integer",
+          minimum: 1,
+          maximum: 10000,
+          description: "Initial output wait timeout in milliseconds.",
+        },
+        maxBytes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20000000,
+          description: "Maximum bytes of terminal output to return.",
+        },
+        host: {
+          type: "string",
+          description: "Optional host override. Requires SSH_PEM_ALLOW_RUNTIME_TARGETS=true.",
+        },
+        user: {
+          type: "string",
+          description: "Optional username override. Requires SSH_PEM_ALLOW_RUNTIME_TARGETS=true.",
+        },
+        keyPath: {
+          type: "string",
+          description: "Optional PEM key path override. Requires SSH_PEM_ALLOW_RUNTIME_TARGETS=true.",
+        },
+        port: {
+          type: "integer",
+          minimum: 1,
+          maximum: 65535,
+          description: "Optional SSH port override. Requires SSH_PEM_ALLOW_RUNTIME_TARGETS=true.",
+        },
+      },
+    },
+  },
+  {
+    name: "ssh_pty_send",
+    description: "Send exact input to a persistent SSH PTY session and return newly available terminal output.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId", "input"],
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session id returned by ssh_pty_start.",
+        },
+        input: {
+          type: "string",
+          description: "Exact bytes/text to write to the remote PTY, for example `pwd\\n`.",
+        },
+        readTimeoutMs: {
+          type: "integer",
+          minimum: 1,
+          maximum: 60000,
+          description: "Output wait timeout in milliseconds after writing input.",
+        },
+        maxBytes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20000000,
+          description: "Maximum bytes of terminal output to return.",
+        },
+      },
+    },
+  },
+  {
+    name: "ssh_pty_read",
+    description: "Read newly available output from a persistent SSH PTY session.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId"],
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session id returned by ssh_pty_start.",
+        },
+        timeoutMs: {
+          type: "integer",
+          minimum: 1,
+          maximum: 60000,
+          description: "Output wait timeout in milliseconds.",
+        },
+        maxBytes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20000000,
+          description: "Maximum bytes of terminal output to return.",
+        },
+      },
+    },
+  },
+  {
+    name: "ssh_pty_stop",
+    description: "Stop a persistent SSH PTY session.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId"],
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session id returned by ssh_pty_start.",
+        },
+        readTimeoutMs: {
+          type: "integer",
+          minimum: 1,
+          maximum: 10000,
+          description: "Output wait timeout in milliseconds while stopping.",
+        },
+        maxBytes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20000000,
+          description: "Maximum bytes of terminal output to return.",
+        },
+      },
+    },
+  },
+  {
+    name: "ssh_pty_list",
+    description: "List persistent SSH PTY sessions currently held by this MCP server process.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+    },
+  },
 ];
 
 function makeResponse(id, result) {
@@ -484,6 +909,46 @@ async function handleRequest(request) {
       return makeResponse(request.id, makeToolResult(result));
     }
 
+    if (name === "ssh_pty_start") {
+      const result = await startPtySession(args);
+      return makeResponse(request.id, makePtyToolResult(result));
+    }
+
+    if (name === "ssh_pty_send") {
+      const result = await sendPtyInput(args);
+      return makeResponse(request.id, makePtyToolResult(result));
+    }
+
+    if (name === "ssh_pty_read") {
+      const result = await readPtySession(args);
+      return makeResponse(request.id, makePtyToolResult(result));
+    }
+
+    if (name === "ssh_pty_stop") {
+      const result = await stopPtySession(args);
+      return makeResponse(request.id, makePtyToolResult(result));
+    }
+
+    if (name === "ssh_pty_list") {
+      return makeResponse(request.id, {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify([...ptySessions.values()].map((session) => ({
+              sessionId: session.id,
+              alive: !session.closed,
+              exitCode: session.exitCode,
+              signal: session.signal,
+              target: session.target,
+              cwd: session.cwd,
+              createdAt: session.createdAt,
+            })), null, 2),
+          },
+        ],
+        isError: false,
+      });
+    }
+
     return makeError(request.id, -32602, `Unknown tool: ${name}`);
   }
 
@@ -521,4 +986,22 @@ rl.on("line", async (line) => {
   } catch (error) {
     writeMessage(makeError(request.id, -32000, error.message));
   }
+});
+
+function closeAllPtySessions() {
+  for (const session of ptySessions.values()) {
+    if (!session.closed) {
+      session.child.kill("SIGTERM");
+    }
+  }
+}
+
+process.once("SIGINT", () => {
+  closeAllPtySessions();
+  process.exit(130);
+});
+
+process.once("SIGTERM", () => {
+  closeAllPtySessions();
+  process.exit(143);
 });

@@ -11,7 +11,7 @@ Use this skill when the user asks to run a command on their configured SSH machi
 
 1. Use `ssh_check` before the first remote command in a session when connectivity has not been verified.
 2. Use `ssh_run` for commands, passing `command`, and optionally `cwd`, `env`, or `timeoutSeconds`.
-3. If the MCP tool is unavailable and a terminal fallback is required, use `ssh-pem-run` or `npm run --silent run -- -- COMMAND`; do not use hand-written JSON-RPC or `node <<'NODE'` heredocs.
+3. If the MCP tool is unavailable and a terminal fallback is required, use the `ssh-pem-run` CLI; do not use package-script aliases, hand-written JSON-RPC, or `node <<'NODE'` heredocs.
 4. Treat `/home/ma-user/work` as the only persistent directory on this remote machine. Put projects, downloads, generated files, checkpoints, and other durable artifacts there.
 5. Keep commands narrow and explain destructive or high-impact operations before running them.
 6. Do not pass private key material as command text. The plugin expects a local PEM path in `SSH_PEM_KEY_PATH`.

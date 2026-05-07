@@ -12,12 +12,6 @@ This Codex plugin exposes an MCP server that runs commands on a remote SSH host 
 When the MCP tool is not loaded directly in Codex, use the bundled CLI instead of a JSON-RPC heredoc:
 
 ```bash
-npm run --silent run -- --cwd /home/ma-user/work --timeout 1200 -- git status --short
-```
-
-or after installing/linking the package:
-
-```bash
 ssh-pem-run --cwd /home/ma-user/work --timeout 1200 -- git status --short
 ```
 
@@ -94,6 +88,8 @@ This plugin also loads the user-installed competition toolchain before each remo
 ```bash
 cd plugins/ssh-pem-executor
 npm run smoke
+npm link
+ssh-pem-run --cwd /home/ma-user/work -- printf 'ok\n'
 ```
 
 ## Security

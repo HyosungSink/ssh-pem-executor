@@ -31,7 +31,7 @@ Edit `./.mcp.json` or set environment variables in the plugin install UI:
   "SSH_PEM_DEFAULT_CWD": "/home/ma-user/work",
   "SSH_PEM_PERSISTENT_WORKDIR": "/home/ma-user/work",
   "SSH_PEM_REMOTE_SHELL": "/bin/bash",
-  "SSH_PEM_REMOTE_SETUP_COMMAND": ". /home/ma-user/Ascend/cann-8.5.0/set_env.sh\nexport PATH=/home/ma-user/gcc/bin:/home/ma-user/cmake-3.28.3-linux-aarch64/bin:$PATH\nexport PYTORCH_SITE=/home/ma-user/anaconda3/envs/MindSpore/lib/python3.9/site-packages\nexport LD_LIBRARY_PATH=/home/ma-user/gcc/lib64:$PYTORCH_SITE/torch/lib:$PYTORCH_SITE/torch_npu/lib:/home/ma-user/anaconda3/envs/MindSpore/lib:$ASCEND_OPP_PATH/vendors/customize/op_api/lib:$ASCEND_OPP_PATH/built-in/op_impl/ai_core/tbe/op_api/lib/linux/aarch64:$LD_LIBRARY_PATH\nexport CC=/home/ma-user/gcc/bin/gcc\nexport CXX=/home/ma-user/gcc/bin/g++\nexport TORCH_DEVICE_BACKEND_AUTOLOAD=0\nexport MAX_JOBS=20\nexport CMAKE_BUILD_PARALLEL_LEVEL=20\nexport MAKEFLAGS=-j20\nexport REMOTE_BUILD_JOBS=20",
+  "SSH_PEM_REMOTE_SETUP_COMMAND": "source /home/ma-user/work/Ascend_Op_Challenge_S8/scripts/setup_remote_toolchain.sh 20 >/dev/null",
   "SSH_PEM_CONNECT_TIMEOUT_SECONDS": "10",
   "SSH_PEM_COMMAND_TIMEOUT_SECONDS": "30",
   "SSH_PEM_MAX_OUTPUT_BYTES": "200000"
@@ -69,14 +69,11 @@ The MCP protocol response is still JSON-RPC internally, but the tool content tex
 
 ## ModelArts Development Baseline
 
-This plugin also loads the user-installed competition toolchain before each remote command:
+For the S8 environment, this plugin can load the repository-maintained toolchain setup before each remote command:
 
-- CANN toolkit: `/home/ma-user/Ascend/cann-8.5.0`
-- GCC/G++: `/home/ma-user/gcc/bin`, version 10.3.0
-- CMake: `/home/ma-user/cmake-3.28.3-linux-aarch64/bin`
-- Runtime libraries: PyTorch, torch_npu, CANN op_api, and customized op_api paths.
-- PyTorch backend autoload is disabled with `TORCH_DEVICE_BACKEND_AUTOLOAD=0`; still import `torch` and `torch_npu` before importing a compiled `custom_ops_lib`.
-- Build parallelism: `20` jobs, about 83% of the available `24 vCPUs | 192 GiB` quota.
+- `SSH_PEM_REMOTE_SETUP_COMMAND` may be set to `source /home/ma-user/work/Ascend_Op_Challenge_S8/scripts/setup_remote_toolchain.sh 20 >/dev/null`.
+- Generate that command from the challenge repo with `bash scripts/setup_remote_toolchain.sh --print-mcp-remote-setup 20`.
+- The script configures CANN, GCC/G++, CMake, PyTorch/torch_npu paths, `TORCH_DEVICE_BACKEND_AUTOLOAD=0`, and 20-job build parallelism.
 
 ## Example Prompts
 

@@ -422,6 +422,19 @@ async function waitForPtyOutput(session, timeoutMs) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, timeoutMs));
 }
 
+async function waitForPtyClose(session, timeoutMs) {
+  if (session.closed) {
+    return;
+  }
+  await new Promise((resolvePromise) => {
+    const timer = setTimeout(resolvePromise, timeoutMs);
+    session.child.once("close", () => {
+      clearTimeout(timer);
+      resolvePromise();
+    });
+  });
+}
+
 async function startPtySession(args = {}) {
   const target = mergeTarget(args);
   await verifyKeyPath(target.keyPath);
@@ -526,20 +539,20 @@ async function sendPtyInput(args = {}) {
 
 async function stopPtySession(args = {}) {
   const session = getPtySession(args.sessionId);
+  const readTimeoutMs = parsePositiveInteger(args.readTimeoutMs, 500, 10_000);
   if (!session.closed) {
     session.child.stdin.write("exit\n");
-    setTimeout(() => {
-      if (!session.closed) {
-        session.child.kill("SIGTERM");
-      }
-    }, 500).unref();
-    setTimeout(() => {
-      if (!session.closed) {
-        session.child.kill("SIGKILL");
-      }
-    }, 2_000).unref();
+    await waitForPtyClose(session, readTimeoutMs);
   }
-  await waitForPtyOutput(session, parsePositiveInteger(args.readTimeoutMs, 500, 10_000));
+  if (!session.closed) {
+    session.child.kill("SIGTERM");
+    await waitForPtyClose(session, 1_000);
+  }
+  if (!session.closed) {
+    session.child.kill("SIGKILL");
+    await waitForPtyClose(session, 1_000);
+  }
+  await waitForPtyOutput(session, readTimeoutMs);
   const output = takePtyOutput(session, parsePositiveInteger(args.maxBytes, getDefaultConfig().maxOutputBytes, 20_000_000));
   ptySessions.delete(args.sessionId);
   return {

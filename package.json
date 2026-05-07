@@ -1,0 +1,17 @@
+{
+  "name": "ssh-pem-executor",
+  "version": "0.1.0",
+  "description": "MCP server for running commands on a remote SSH host with a PEM private key.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ssh-pem-executor-mcp": "./scripts/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node ./scripts/server.js",
+    "smoke": "node ./scripts/smoke-test.js"
+  }
+}

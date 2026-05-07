@@ -1,0 +1,41 @@
+{
+  "name": "ssh-pem-executor",
+  "version": "0.1.0",
+  "description": "Run commands on a remote SSH host with a PEM private key through MCP.",
+  "author": {
+    "name": "Local",
+    "email": "local@example.com",
+    "url": "https://example.com"
+  },
+  "homepage": "https://example.com/ssh-pem-executor",
+  "repository": "https://example.com/ssh-pem-executor",
+  "license": "MIT",
+  "keywords": [
+    "ssh",
+    "mcp",
+    "pem",
+    "remote-command"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "SSH PEM Executor",
+    "shortDescription": "Run remote SSH commands with a PEM key.",
+    "longDescription": "Adds MCP tools for checking and executing commands on a configured SSH host using a local PEM private key path.",
+    "developerName": "Local",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Execute"
+    ],
+    "websiteURL": "https://example.com/ssh-pem-executor",
+    "privacyPolicyURL": "https://example.com/privacy",
+    "termsOfServiceURL": "https://example.com/terms",
+    "defaultPrompt": [
+      "Check my SSH PEM connection.",
+      "Run uptime on my SSH host.",
+      "Show disk usage on my SSH host."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
